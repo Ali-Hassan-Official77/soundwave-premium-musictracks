@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { audiusFetch, normalizeTrack } from "../../../lib/audius";
+import { audiusFetch, normalizeTrack } from "../../../../lib/audius";
 
 export const runtime = "nodejs";
 
