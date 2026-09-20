@@ -1,0 +1,18 @@
+<svg width="1200" height="700" viewBox="0 0 1200 700" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="1200" height="700" rx="36" fill="#17191D"/>
+<circle cx="880" cy="350" r="250" fill="#D4AF37" fill-opacity=".09"/>
+<circle cx="880" cy="350" r="190" stroke="#D4AF37" stroke-opacity=".24" stroke-width="1.5"/>
+<circle cx="880" cy="350" r="135" stroke="#D4AF37" stroke-opacity=".35" stroke-width="2"/>
+<circle cx="880" cy="350" r="80" fill="#0B0C0E" stroke="#D4AF37" stroke-opacity=".65" stroke-width="2"/>
+<circle cx="880" cy="350" r="12" fill="#D4AF37"/>
+<path d="M190 470C300 390 340 300 450 270C560 240 585 370 680 315" stroke="#D4AF37" stroke-width="5" stroke-linecap="round" opacity=".8"/>
+<path d="M170 520C295 430 350 335 455 330C560 325 610 430 720 390" stroke="#F3E7B0" stroke-opacity=".45" stroke-width="2" stroke-linecap="round"/>
+<g opacity=".55">
+<rect x="125" y="145" width="7" height="145" rx="3.5" fill="#D4AF37"/>
+<rect x="148" y="195" width="7" height="95" rx="3.5" fill="#D4AF37"/>
+<rect x="171" y="115" width="7" height="175" rx="3.5" fill="#D4AF37"/>
+<rect x="194" y="175" width="7" height="115" rx="3.5" fill="#D4AF37"/>
+<rect x="217" y="135" width="7" height="155" rx="3.5" fill="#D4AF37"/>
+</g>
+<text x="105" y="105" fill="#D4AF37" font-family="Arial, sans-serif" font-size="18" letter-spacing="5">SOUNDWAVE / AUDIO</text>
+</svg>

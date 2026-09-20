@@ -1,0 +1,660 @@
+"use client";
+
+import Image from "next/image";
+import { AnimatePresence, motion } from "motion/react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Bell,
+  ChevronLeft,
+  ChevronRight,
+  Disc3,
+  Heart,
+  Home,
+  Library,
+  Menu,
+  Music2,
+  Pause,
+  Play,
+  Repeat2,
+  Search,
+  Settings2,
+  Shuffle,
+  SkipBack,
+  SkipForward,
+  SlidersHorizontal,
+  Volume2,
+  VolumeX,
+  X,
+  Zap,
+} from "lucide-react";
+
+const FAVORITES_KEY = "soundwave-favorites";
+const RECENT_KEY = "soundwave-recent";
+const HERO_INTERVAL = 5200;
+
+function formatTime(seconds = 0) {
+  const value = Math.max(0, Math.floor(Number(seconds) || 0));
+  return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, "0")}`;
+}
+
+function TrackArt({ src, alt = "", className = "" }) {
+  const [failed, setFailed] = useState(false);
+
+  const imageSrc = useMemo(() => {
+    if (!src || typeof src !== "string") {
+      return null;
+    }
+
+    if (src.startsWith("https://") || src.startsWith("http://")) {
+      return src;
+    }
+
+    if (src.startsWith("/")) {
+      return src;
+    }
+
+    return null;
+  }, [src]);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [imageSrc]);
+
+  if (!imageSrc || failed) {
+    return (
+      <div
+        className={`art-fallback ${className}`}
+        aria-label={alt || "Album artwork unavailable"}
+      >
+        <Disc3 size={30} strokeWidth={1.5} />
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={imageSrc}
+      alt={alt}
+      className={className}
+      loading="lazy"
+      decoding="async"
+      referrerPolicy="no-referrer"
+      onError={() => {
+        setFailed(true);
+      }}
+    />
+  );
+}
+
+function TrackCard({ track, onPlay, liked, onLike }) {
+  return (
+    <motion.article
+      className="track-card"
+      whileHover={{ y: -5 }}
+      transition={{ duration: 0.2 }}
+    >
+      <button
+        type="button"
+        className="cover-wrap"
+        onClick={() => onPlay(track)}
+        aria-label={`Play ${track.title}`}
+      >
+        <TrackArt src={track.artwork} alt="" className="cover" />
+        <span className="cover-shade" />
+        <span className="cover-play">
+          <Play size={17} fill="currentColor" />
+        </span>
+        <span className="genre-pill">{track.genre}</span>
+      </button>
+
+      <div className="track-copy">
+        <div className="track-title-row">
+          <div className="track-text">
+            <h3 title={track.title}>{track.title}</h3>
+            <p title={track.artist}>{track.artist}</p>
+          </div>
+          <button
+            type="button"
+            className={`mini-like ${liked ? "liked" : ""}`}
+            onClick={() => onLike(track)}
+            aria-label={liked ? `Remove ${track.title} from favorites` : `Add ${track.title} to favorites`}
+          >
+            <Heart size={17} fill={liked ? "currentColor" : "none"} />
+          </button>
+        </div>
+        <div className="track-meta">
+          <span>{Number(track.playCount || 0).toLocaleString()} plays</span>
+          <span>{formatTime(track.duration)}</span>
+        </div>
+      </div>
+    </motion.article>
+  );
+}
+
+export default function MusicApp() {
+  const [tracks, setTracks] = useState([]);
+  const [results, setResults] = useState([]);
+  const [query, setQuery] = useState("");
+  const [active, setActive] = useState("Home");
+  const [current, setCurrent] = useState(null);
+  const [playing, setPlaying] = useState(false);
+  const [favorites, setFavorites] = useState([]);
+  const [recent, setRecent] = useState([]);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [searching, setSearching] = useState(false);
+  const [error, setError] = useState("");
+  const [volume, setVolume] = useState(0.8);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [shuffle, setShuffle] = useState(false);
+  const [repeat, setRepeat] = useState(false);
+  const [heroIndex, setHeroIndex] = useState(0);
+  const [heroPaused, setHeroPaused] = useState(false);
+  const [playlistName, setPlaylistName] = useState("");
+
+  const audioRef = useRef(null);
+  const searchTimer = useRef(null);
+  const railRef = useRef(null);
+
+  const loadTrending = useCallback(async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const response = await fetch("/api/trending?limit=36&time=week", { cache: "no-store" });
+      const data = await response.json();
+
+      if (!response.ok) throw new Error(data.error || "Unable to load the catalog.");
+      setTracks(Array.isArray(data.tracks) ? data.tracks : []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to load the catalog.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const searchCatalog = useCallback(async (value) => {
+    const clean = value.trim();
+    if (!clean) {
+      setResults([]);
+      setSearching(false);
+      return;
+    }
+
+    setSearching(true);
+    setError("");
+
+    try {
+      const response = await fetch(`/api/search?q=${encodeURIComponent(clean)}&limit=36`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Search failed.");
+      setResults(Array.isArray(data.tracks) ? data.tracks : []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Search failed.");
+    } finally {
+      setSearching(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const savedFavorites = JSON.parse(window.localStorage.getItem(FAVORITES_KEY) || "[]");
+      const savedRecent = JSON.parse(window.localStorage.getItem(RECENT_KEY) || "[]");
+      if (Array.isArray(savedFavorites)) setFavorites(savedFavorites);
+      if (Array.isArray(savedRecent)) setRecent(savedRecent);
+    } catch {
+      window.localStorage.removeItem(FAVORITES_KEY);
+      window.localStorage.removeItem(RECENT_KEY);
+    }
+
+    void loadTrending();
+  }, [loadTrending]);
+
+  useEffect(() => {
+    return () => {
+      if (searchTimer.current) window.clearTimeout(searchTimer.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!tracks.length || heroPaused) return undefined;
+    const timer = window.setInterval(() => {
+      setHeroIndex((index) => (index + 1) % tracks.length);
+    }, HERO_INTERVAL);
+    return () => window.clearInterval(timer);
+  }, [tracks.length, heroPaused]);
+
+  useEffect(() => {
+    if (heroIndex >= tracks.length && tracks.length) setHeroIndex(0);
+  }, [heroIndex, tracks.length]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return undefined;
+
+    const updateTime = () => setCurrentTime(audio.currentTime || 0);
+    const updateDuration = () => {
+      setDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
+    };
+
+    audio.addEventListener("timeupdate", updateTime);
+    audio.addEventListener("loadedmetadata", updateDuration);
+    audio.addEventListener("durationchange", updateDuration);
+
+    return () => {
+      audio.removeEventListener("timeupdate", updateTime);
+      audio.removeEventListener("loadedmetadata", updateDuration);
+      audio.removeEventListener("durationchange", updateDuration);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.volume = volume;
+  }, [volume]);
+
+  useEffect(() => {
+    const rail = railRef.current;
+    if (!rail || tracks.length < 2) return undefined;
+
+    let frame;
+    let last = performance.now();
+    const speed = 0.035;
+
+    const tick = (now) => {
+      const delta = now - last;
+      last = now;
+      if (!rail.matches(":hover") && !heroPaused) {
+        rail.scrollLeft += delta * speed;
+        if (rail.scrollLeft >= rail.scrollWidth / 2) rail.scrollLeft = 0;
+      }
+      frame = requestAnimationFrame(tick);
+    };
+
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [tracks.length, heroPaused]);
+
+  const hero = tracks[heroIndex] || tracks[0] || null;
+
+  const playlistFilters = useMemo(() => ({
+    "Chill Vibes": ["chill", "ambient", "lofi", "acoustic"],
+    "Workout Pump": ["hip hop", "edm", "dance", "electronic"],
+    "Late Night": ["r&b", "rnb", "soul", "jazz", "night"],
+    "Focus Flow": ["classical", "ambient", "instrumental", "electronic"],
+    "Road Trip": ["rock", "pop", "indie", "country"],
+  }), []);
+
+  const viewTracks = useMemo(() => {
+    if (active === "Favorites") return favorites;
+    if (active === "Library") return recent;
+    if (active === "Search") return results;
+    if (active === "Playlist") {
+      const terms = playlistFilters[playlistName] || [];
+      const filtered = tracks.filter((track) => {
+        const haystack = `${track.genre} ${track.mood} ${track.title} ${track.artist}`.toLowerCase();
+        return terms.some((term) => haystack.includes(term));
+      });
+      return filtered.length ? filtered : tracks;
+    }
+    return tracks;
+  }, [active, favorites, playlistFilters, playlistName, recent, results, tracks]);
+
+  const displayed = viewTracks.slice(0, 18);
+
+  function handleSearch(event) {
+    const value = event.target.value;
+    setQuery(value);
+    setActive(value.trim() ? "Search" : "Home");
+    setPlaylistName("");
+
+    if (searchTimer.current) window.clearTimeout(searchTimer.current);
+    searchTimer.current = window.setTimeout(() => void searchCatalog(value), 350);
+  }
+
+  function clearSearch() {
+    if (searchTimer.current) window.clearTimeout(searchTimer.current);
+    setQuery("");
+    setResults([]);
+    setActive("Home");
+  }
+
+  function toggleFavorite(track) {
+    setFavorites((previous) => {
+      const exists = previous.some((item) => item.id === track.id);
+      const next = exists ? previous.filter((item) => item.id !== track.id) : [track, ...previous];
+      window.localStorage.setItem(FAVORITES_KEY, JSON.stringify(next));
+      return next;
+    });
+  }
+
+  function playTrack(track) {
+    if (!track?.id) return;
+    setCurrent(track);
+    setCurrentTime(0);
+    setDuration(Number(track.duration) || 0);
+    setPlaying(true);
+    setRecent((previous) => {
+      const next = [track, ...previous.filter((item) => item.id !== track.id)].slice(0, 30);
+      window.localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+      return next;
+    });
+  }
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || !current?.id) return undefined;
+
+    audio.pause();
+    audio.src = `/api/stream/${encodeURIComponent(current.id)}`;
+    audio.load();
+    audio.volume = volume;
+
+    let cancelled = false;
+    const start = async () => {
+      try {
+        await audio.play();
+        if (!cancelled) setPlaying(true);
+      } catch {
+        if (!cancelled) setPlaying(false);
+      }
+    };
+
+    void start();
+    return () => {
+      cancelled = true;
+      audio.pause();
+      audio.removeAttribute("src");
+      audio.load();
+    };
+  }, [current]);
+
+  function step(direction) {
+    const list = viewTracks.length ? viewTracks : tracks;
+    if (!list.length) return;
+
+    const currentIndex = list.findIndex((track) => track.id === current?.id);
+    let nextIndex;
+
+    if (shuffle && list.length > 1) {
+      do {
+        nextIndex = Math.floor(Math.random() * list.length);
+      } while (nextIndex === currentIndex);
+    } else {
+      const index = currentIndex < 0 ? (direction > 0 ? 0 : list.length - 1) : currentIndex;
+      nextIndex = (index + direction + list.length) % list.length;
+    }
+
+    playTrack(list[nextIndex]);
+  }
+
+  function togglePlayback() {
+    const audio = audioRef.current;
+    if (!audio || !current) {
+      if (tracks[0]) playTrack(tracks[0]);
+      return;
+    }
+
+    if (audio.paused) {
+      audio.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+    } else {
+      audio.pause();
+      setPlaying(false);
+    }
+  }
+
+  function seek(event) {
+    const value = Number(event.target.value);
+    setCurrentTime(value);
+    if (audioRef.current) audioRef.current.currentTime = value;
+  }
+
+  function navigate(label) {
+    setMobileOpen(false);
+    setPlaylistName("");
+    setActive(label);
+    if (label === "Explore") {
+      setActive("Home");
+      window.setTimeout(() => document.querySelector("#catalog")?.scrollIntoView({ behavior: "smooth" }), 0);
+    }
+  }
+
+  function openPlaylist(name) {
+    setPlaylistName(name);
+    setActive("Playlist");
+    setMobileOpen(false);
+    window.setTimeout(() => document.querySelector("#catalog")?.scrollIntoView({ behavior: "smooth" }), 0);
+  }
+
+  function moveHero(direction) {
+    if (!tracks.length) return;
+    setHeroIndex((index) => (index + direction + tracks.length) % tracks.length);
+  }
+
+  return (
+    <div className="app-shell">
+      <audio
+        ref={audioRef}
+        preload="metadata"
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onError={() => {
+          setPlaying(false);
+          setError("This track could not be streamed. Please try another track.");
+        }}
+        onEnded={() => {
+          if (repeat && current) playTrack(current);
+          else step(1);
+        }}
+      />
+
+      <aside className={`sidebar ${mobileOpen ? "open" : ""}`}>
+        <div className="brand">
+          <div className="brand-mark"><Image src="/logo.svg" alt="SoundWave" width={44} height={44} unoptimized /></div>
+          <div><strong>SoundWave</strong><span>Streaming Music</span></div>
+        </div>
+
+        <nav>
+          <div className="nav-label">Menu</div>
+          {[
+            [Home, "Home"],
+            [Search, "Explore"],
+            [Heart, "Favorites"],
+            [Library, "Library"],
+          ].map(([Icon, label]) => (
+            <button
+              type="button"
+              key={label}
+              className={`nav-item ${active === label ? "active" : ""}`}
+              onClick={() => navigate(label)}
+            >
+              <Icon size={19} />
+              <span>{label}</span>
+              {label === "Favorites" && favorites.length > 0 ? <b>{favorites.length}</b> : null}
+              {label === "Library" && recent.length > 0 ? <b>{recent.length}</b> : null}
+            </button>
+          ))}
+        </nav>
+
+        <div className="nav-section">
+          <div className="nav-label">Your Playlists</div>
+          {Object.keys(playlistFilters).map((name, index) => (
+            <button
+              type="button"
+              className={`playlist-item ${active === "Playlist" && playlistName === name ? "selected" : ""}`}
+              key={name}
+              onClick={() => openPlaylist(name)}
+            >
+              <span className={`playlist-dot dot-${index}`} />
+              <span>{name}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="sidebar-bottom">
+          <div className="plan-card">
+            <Zap size={17} />
+            <div><strong>SoundWave Pro</strong><span>Curated listening, made simple.</span></div>
+          </div>
+        </div>
+      </aside>
+
+      {mobileOpen ? <button type="button" className="sidebar-scrim" aria-label="Close menu" onClick={() => setMobileOpen(false)} /> : null}
+
+      <main className="main">
+        <header className="topbar">
+          <button type="button" className="mobile-menu" onClick={() => setMobileOpen((value) => !value)} aria-label="Open menu">
+            {mobileOpen ? <X size={22} /> : <Menu size={22} />}
+          </button>
+
+          <div className="search-box">
+            <Search size={18} />
+            <input value={query} onChange={handleSearch} placeholder="Search songs, artists, albums..." aria-label="Search songs, artists, albums" />
+            {query ? <button type="button" onClick={clearSearch} aria-label="Clear search"><X size={16} /></button> : null}
+          </div>
+
+          <div className="user-actions">
+            <button type="button" className="icon-btn" aria-label="Notifications"><Bell size={19} /></button>
+            <button type="button" className="icon-btn" aria-label="Settings"><Settings2 size={19} /></button>
+            <div className="avatar">AH</div>
+          </div>
+        </header>
+
+        {error ? (
+          <div className="error-banner">
+            <span>{error}</span>
+            <button type="button" onClick={() => void loadTrending()}>Retry</button>
+          </div>
+        ) : null}
+
+        {active === "Home" && hero ? (
+          <motion.section
+            className="hero"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            onMouseEnter={() => setHeroPaused(true)}
+            onMouseLeave={() => setHeroPaused(false)}
+          >
+            <Image src="/hero-banner.svg" alt="SoundWave" fill priority unoptimized className="hero-art" />
+            <div className="hero-image-tint" />
+            <div className="hero-overlay" />
+
+            <div className="hero-content">
+              <span className="hero-tag"><Zap size={12} /> Trending on SoundWave</span>
+              <AnimatePresence mode="wait">
+                <motion.div key={hero.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.3 }}>
+                  <div className="hero-kicker">#{String(heroIndex + 1).padStart(2, "0")} · {hero.genre}</div>
+                  <h1>{hero.title}</h1>
+                  <p>Discover independent sounds from the Audius catalog in a polished, fast and responsive listening experience.</p>
+                  <div className="hero-actions">
+                    <button type="button" className="btn primary" onClick={() => playTrack(hero)}><Play size={17} fill="currentColor" /> Play now</button>
+                    <button type="button" className="btn secondary" onClick={() => toggleFavorite(hero)}><Heart size={17} fill={favorites.some((favorite) => favorite.id === hero.id) ? "currentColor" : "none"} /> Save</button>
+                  </div>
+                  <div className="hero-byline"><span>{hero.artist}</span><i /><span>{formatTime(hero.duration)}</span><i /><span>{Number(hero.playCount || 0).toLocaleString()} plays</span></div>
+                </motion.div>
+              </AnimatePresence>
+            </div>
+
+            <div className="hero-controls">
+              <button type="button" onClick={() => moveHero(-1)} aria-label="Previous featured track"><ChevronLeft size={18} /></button>
+              <button type="button" className="hero-pause" onClick={() => setHeroPaused((value) => !value)} aria-label={heroPaused ? "Resume hero rotation" : "Pause hero rotation"}>{heroPaused ? <Play size={13} fill="currentColor" /> : <Pause size={13} fill="currentColor" />}</button>
+              <button type="button" onClick={() => moveHero(1)} aria-label="Next featured track"><ChevronRight size={18} /></button>
+            </div>
+
+            <div className="hero-rail-wrap">
+              <div className="hero-rail" ref={railRef}>
+                {[...tracks, ...tracks].map((track, index) => (
+                  <button type="button" className={`hero-rail-card ${track.id === hero.id ? "active" : ""}`} key={`${track.id}-${index}`} onClick={() => { setHeroIndex(index % tracks.length); playTrack(track); }}>
+                    <TrackArt src={track.artwork} alt="" className="hero-rail-art" />
+                    <span><strong>{track.title}</strong><small>{track.artist}</small></span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </motion.section>
+        ) : null}
+
+        <section id="catalog" className="section">
+          <div className="section-header">
+            <div>
+              <span className="eyebrow">
+                {active === "Search" ? "Catalog search" : active === "Favorites" ? "Your collection" : active === "Library" ? "Listening history" : active === "Playlist" ? "Curated playlist" : "Fresh from Audius"}
+              </span>
+              <h2>
+                {active === "Search" ? `Results for “${query}”` : active === "Favorites" ? "Your favorites" : active === "Library" ? "Recently played" : active === "Playlist" ? playlistName : "Trending now"}
+              </h2>
+            </div>
+            <div className="section-tools">
+              <button type="button" className="filter-btn"><SlidersHorizontal size={16} /> Filter</button>
+              <button type="button" className="see-all" onClick={() => void loadTrending()}>Refresh <ChevronRight size={16} /></button>
+            </div>
+          </div>
+
+          {loading || searching ? (
+            <div className="skeleton-grid">
+              {Array.from({ length: 12 }, (_, index) => <div className="skeleton-card" key={index}><div /><span /><small /></div>)}
+            </div>
+          ) : displayed.length ? (
+            <div className="grid">
+              {displayed.map((track) => (
+                <TrackCard key={track.id} track={track} onPlay={playTrack} liked={favorites.some((favorite) => favorite.id === track.id)} onLike={toggleFavorite} />
+              ))}
+            </div>
+          ) : (
+            <div className="empty-state">
+              <Disc3 size={36} />
+              <h3>{active === "Favorites" ? "Your favorites are empty" : active === "Library" ? "Nothing played yet" : "No tracks found"}</h3>
+              <p>{active === "Favorites" ? "Save songs while exploring and they will appear here." : active === "Library" ? "Play a track and it will be saved here automatically." : "Try another artist, song or keyword."}</p>
+            </div>
+          )}
+        </section>
+
+        <footer className="footer">
+          <div className="footer-main">
+            <div className="footer-brand"><Image src="/logo.svg" alt="SoundWave" width={38} height={38} unoptimized /><strong>SoundWave</strong></div>
+            <p>Independent music discovery with a premium listening experience, built for desktop and mobile.</p>
+            <a className="footer-email" href="mailto:alihassanofficial223@gmail.com">alihassanofficial223@gmail.com</a>
+          </div>
+          <div className="footer-links">
+            <div><strong>Platform</strong><button type="button" onClick={() => navigate("Explore")}>Discover</button><button type="button" onClick={() => navigate("Home")}>Trending</button><button type="button" onClick={() => navigate("Library")}>Library</button></div>
+            <div><strong>Collection</strong><button type="button" onClick={() => navigate("Favorites")}>Favorites</button><button type="button" onClick={() => openPlaylist("Chill Vibes")}>Playlists</button><button type="button" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>Back to top</button></div>
+            <div><strong>Contact</strong><span>Ali Hassan Official 223</span><span>London, United Kingdom</span><a href="mailto:alihassanofficial223@gmail.com">Email us</a></div>
+          </div>
+          <div className="footer-bottom"><span>© 2026 SoundWave. All rights reserved.</span><span>Music powered by Audius</span></div>
+        </footer>
+      </main>
+
+      <AnimatePresence>
+        {current ? (
+          <motion.div className="player" initial={{ y: 100, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 100, opacity: 0 }}>
+            <div className="player-track">
+              <TrackArt src={current.artwork} alt="" className="player-art" />
+              <div><strong>{current.title}</strong><span>{current.artist}</span></div>
+              <button type="button" className={`mini-like ${favorites.some((favorite) => favorite.id === current.id) ? "liked" : ""}`} onClick={() => toggleFavorite(current)} aria-label="Toggle favorite"><Heart size={17} fill={favorites.some((favorite) => favorite.id === current.id) ? "currentColor" : "none"} /></button>
+            </div>
+
+            <div className="player-center">
+              <div className="player-controls">
+                <button type="button" className={shuffle ? "control-on" : ""} onClick={() => setShuffle((value) => !value)} aria-label="Toggle shuffle"><Shuffle size={16} /></button>
+                <button type="button" onClick={() => step(-1)} aria-label="Previous track"><SkipBack size={19} fill="currentColor" /></button>
+                <button type="button" className="main-play" onClick={togglePlayback} aria-label={playing ? "Pause" : "Play"}>{playing ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}</button>
+                <button type="button" onClick={() => step(1)} aria-label="Next track"><SkipForward size={19} fill="currentColor" /></button>
+                <button type="button" className={repeat ? "control-on" : ""} onClick={() => setRepeat((value) => !value)} aria-label="Toggle repeat"><Repeat2 size={16} /></button>
+              </div>
+              <div className="progress-row">
+                <span>{formatTime(currentTime)}</span>
+                <input type="range" min="0" max={duration || Number(current.duration) || 1} value={Math.min(currentTime, duration || Number(current.duration) || 1)} onChange={seek} aria-label="Track progress" />
+                <span>{formatTime(duration || current.duration)}</span>
+              </div>
+            </div>
+
+            <div className="player-volume">
+              {volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
+              <input type="range" min="0" max="1" step="0.01" value={volume} onChange={(event) => setVolume(Number(event.target.value))} aria-label="Volume" />
+            </div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+    </div>
+  );
+}
